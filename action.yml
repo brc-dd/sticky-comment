@@ -1,0 +1,104 @@
+name: Sticky Comment
+description: Create or update a PR/issue comment using a hidden marker to identify it.
+author: brc-dd
+
+branding:
+  icon: message-square
+  color: blue
+
+inputs:
+  token:
+    description: GitHub token with issues/pull-requests write permission.
+    default: ${{ github.token }}
+  repository:
+    description: Full repository name (owner/repo).
+    default: ${{ github.repository }}
+  issue-number:
+    description: Issue or pull request number to comment on.
+    default: ${{ github.event.pull_request.number || github.event.issue.number }}
+  comment-author:
+    description: Filter comments by author (GitHub username) when searching.
+    default: github-actions[bot]
+  id:
+    description: >-
+      Unique marker to identify the comment. Used to find and update the same
+      comment across workflow runs. Embedded as a hidden HTML comment in the body.
+    required: true
+  body:
+    description: Comment body (Markdown). Cannot be used with body-path.
+  body-path:
+    description: Path to a file containing the comment body. Cannot be used with body.
+
+outputs:
+  comment-id:
+    description: ID of the created or updated comment.
+    value: ${{ steps.couc.outputs.comment-id }}
+  comment-node-id:
+    description: GraphQL node ID of the matched comment (empty if newly created).
+    value: ${{ steps.fc.outputs.comment-node-id }}
+  comment-body:
+    description: Body of the matched comment before update (empty if newly created).
+    value: ${{ steps.fc.outputs.comment-body }}
+  comment-author:
+    description: Author of the matched comment (empty if newly created).
+    value: ${{ steps.fc.outputs.comment-author }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check context
+      id: check
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.issue-number }}" ]; then
+          echo "::notice::No issue or pull request number detected. Skipping."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Build body
+      if: steps.check.outputs.skip != 'true'
+      id: build
+      shell: bash
+      env:
+        MARKER: ${{ inputs.id }}
+        BODY: ${{ inputs.body }}
+        BODY_PATH: ${{ inputs.body-path }}
+      run: |
+        if [ -n "$BODY_PATH" ] && [ -n "$BODY" ]; then
+          echo "::error::Cannot use both 'body' and 'body-path'."
+          exit 1
+        fi
+
+        if [ -n "$BODY_PATH" ]; then
+          BODY=$(cat "$BODY_PATH")
+        fi
+
+        {
+          echo 'body<<GH_EOF'
+          printf '<!-- sticky-comment-id: %s -->\n%s' "$MARKER" "$BODY"
+          echo
+          echo 'GH_EOF'
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Find comment
+      if: steps.check.outputs.skip != 'true'
+      uses: peter-evans/find-comment@v4
+      id: fc
+      with:
+        token: ${{ inputs.token }}
+        repository: ${{ inputs.repository }}
+        issue-number: ${{ inputs.issue-number }}
+        comment-author: ${{ inputs.comment-author }}
+        body-includes: '<!-- sticky-comment-id: ${{ inputs.id }} -->'
+
+    - name: Create or update comment
+      if: steps.check.outputs.skip != 'true'
+      uses: peter-evans/create-or-update-comment@v5
+      id: couc
+      with:
+        token: ${{ inputs.token }}
+        repository: ${{ inputs.repository }}
+        issue-number: ${{ inputs.issue-number }}
+        comment-id: ${{ steps.fc.outputs.comment-id }}
+        body: ${{ steps.build.outputs.body }}
+        edit-mode: replace
