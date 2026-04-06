@@ -15,6 +15,16 @@ A GitHub Action that creates or updates a PR/issue comment, using a hidden marke
 
 On the first run, a new comment is created. On subsequent runs with the same `id`, the existing comment is updated instead of posting a duplicate. If no PR or issue context is detected, the action is silently skipped.
 
+## Permissions
+
+The workflow (or job) must grant write access so the action can read and post comments:
+
+```yaml
+permissions:
+  pull-requests: write # for pull request comments
+  issues: write # for issue comments (if used on issues)
+```
+
 ## Inputs
 
 | Input | Description | Default |
